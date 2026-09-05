@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">Pudding Lab — proposed desktop composition</title>
+  <desc id="desc">Layout study with editorial typography, a stylized caramel pudding silhouette, and a settings card. This is an SVG design sketch, not a rendered Three.js scene.</desc>
+  <defs>
+    <linearGradient id="custard" x1="0" x2="1"><stop stop-color="#f4dda4"/><stop offset=".45" stop-color="#eacc87"/><stop offset="1" stop-color="#c5954b"/></linearGradient>
+    <linearGradient id="caramel" x1="0" y1="0" x2=".2" y2="1"><stop stop-color="#bd783d"/><stop offset="1" stop-color="#703916"/></linearGradient>
+    <radialGradient id="shadow"><stop stop-color="#34413b" stop-opacity=".25"/><stop offset="1" stop-color="#34413b" stop-opacity="0"/></radialGradient>
+  </defs>
+  <rect width="1440" height="900" fill="#e8e7e2"/>
+  <g fill="#69716b" font-family="Arial, sans-serif" font-size="10" letter-spacing="3">
+    <text x="52" y="46">A LITTLE DESSERT LAB / NO. 001</text>
+    <text x="1220" y="46">DESIGN STUDY · 01</text>
+  </g>
+  <g fill="#26302e" font-family="Georgia, serif" font-size="104" letter-spacing="-7">
+    <text x="48" y="159">Soft</text><text x="46" y="251" font-style="italic">Pudding.</text>
+  </g>
+  <g fill="#69716b" font-family="Arial, sans-serif" font-size="13">
+    <text x="54" y="295">A little caramel.</text><text x="54" y="316">A little gravity.</text><text x="54" y="337">A very happy wobble.</text>
+  </g>
+  <g stroke="#687368" opacity=".065" fill="none">
+    <path d="M0 680H1440 M0 740H1440 M0 825H1440 M0 630H1440"/>
+    <path d="M700 530L100 900 M740 530L450 900 M780 530L800 900 M820 530L1150 900 M860 530L1500 900"/>
+  </g>
+  <ellipse cx="780" cy="659" rx="282" ry="78" fill="url(#shadow)"/>
+  <path d="M619 423 Q620 392 656 386 Q768 361 880 386 Q916 392 917 423 L965 596 Q975 636 930 654 Q780 703 624 660 Q574 647 580 607Z" fill="url(#custard)"/>
+  <g fill="none" stroke-linecap="round">
+    <path d="M648 442Q622 538 626 625" stroke="#fff3ca" stroke-width="21" opacity=".45"/>
+    <path d="M703 451Q687 552 694 648" stroke="#a67233" stroke-width="14" opacity=".13"/>
+    <path d="M750 453Q742 560 749 654" stroke="#fff3ca" stroke-width="24" opacity=".34"/>
+    <path d="M823 451Q839 558 836 648" stroke="#a67233" stroke-width="17" opacity=".18"/>
+    <path d="M879 442Q911 552 914 621" stroke="#fff3ca" stroke-width="15" opacity=".3"/>
+  </g>
+  <path d="M619 423 Q614 396 655 386 Q768 359 881 386 Q922 397 917 423 Q906 444 881 449 Q866 448 866 470 Q865 490 855 489 Q845 487 846 458 Q731 478 661 451 Q647 450 646 468 Q640 477 635 464 L630 442Z" fill="url(#caramel)"/>
+  <path d="M644 405Q725 378 827 394" fill="none" stroke="#ffe6b7" stroke-width="6" stroke-linecap="round" opacity=".56"/>
+  <g font-family="Arial, sans-serif" fill="#69716b" font-size="10" letter-spacing="2"><text x="667" y="742">PROPOSED SHAPE &amp; PALETTE</text></g>
+  <rect x="1098" y="466" width="290" height="362" rx="22" fill="#fafaf7" stroke="#ffffff"/>
+  <g font-family="Arial, sans-serif" fill="#26302e">
+    <text x="1120" y="500" font-size="10" letter-spacing="2.4">THE PUDDING</text><text x="1310" y="500" font-size="10" fill="#798179">01 / 03</text>
+    <rect x="1119" y="521" width="79" height="30" rx="15" fill="#eee5d0" stroke="#79725d"/><rect x="1206" y="521" width="68" height="30" rx="15" fill="#efefeb"/><rect x="1282" y="521" width="85" height="30" rx="15" fill="#efefeb"/>
+    <g font-size="11"><text x="1135" y="540">Vanilla</text><text x="1225" y="540">Berry</text><text x="1305" y="540">Matcha</text></g>
+    <g font-size="11"><text x="1120" y="582">Firmness</text><text x="1327" y="582">Soft</text><text x="1120" y="635">Damping</text><text x="1316" y="635">Gentle</text></g>
+    <g stroke-width="5" stroke-linecap="round"><path d="M1122 598H1364 M1122 651H1364" stroke="#dedfd8"/><path d="M1122 598H1210 M1122 651H1186" stroke="#26302e"/></g>
+    <circle cx="1210" cy="598" r="7"/><circle cx="1186" cy="651" r="7"/>
+    <rect x="1119" y="678" width="145" height="39" rx="9" fill="#26302e"/><rect x="1272" y="678" width="96" height="39" rx="9" fill="none" stroke="#d4d8d0"/>
+    <g font-size="11"><text x="1146" y="702" fill="#fafaf7">Give it a nudge</text><text x="1304" y="702">Reset</text></g>
+    <g font-size="10" fill="#69716b"><text x="1120" y="747">□ ¼ speed</text><text x="1207" y="747">□ Mesh</text><text x="1322" y="747">Pause</text></g>
+    <path d="M1120 768H1366" stroke="#e0e1db"/><text x="1120" y="796" font-size="10" fill="#69716b">↗ Inside the experiment</text>
+  </g>
+  <g font-family="Arial, sans-serif"><text x="54" y="776" fill="#26302e" font-size="13">Grab. Stretch. Let go.</text><text x="54" y="797" fill="#69716b" font-size="12">A small moment of sweetness.</text>
+    <g fill="#69716b" font-size="9" letter-spacing="2"><text x="54" y="853">VOLUME · LIVE</text><text x="205" y="853">MOTION · LIVE</text><text x="596" y="869">LAYOUT SKETCH — NOT A WEBGPU RENDER</text></g>
+  </g>
+</svg>

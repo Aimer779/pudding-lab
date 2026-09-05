@@ -1,0 +1,17 @@
+{
+  "name": "pudding-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test --test-isolation=none tests/*.test.ts",
+    "validate:physics": "node --experimental-strip-types scripts/validate-physics.ts",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": { "three": "0.185.1" },
+  "devDependencies": { "@types/three": "0.185.4", "typescript": "7.0.2", "vite": "8.2.2", "@types/node": "^24.0.0" },
+  "packageManager": "pnpm@11.14.0"
+}
