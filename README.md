@@ -6,6 +6,10 @@
 
 体验需要支持 WebGPU 的浏览器，并开启硬件加速。
 
+## 灵感来源
+
+本项目的灵感来自 [@scottstts 在 X 上的这篇帖子](https://x.com/scottstts/status/2096008241104711698)。感谢原作者的分享！
+
 ## 本地运行
 
 环境：Node.js 24 或符合 Vite 要求的 Node.js 版本，pnpm 11。测试命令使用 Node 24 的 TypeScript 去类型和无子进程测试模式。
