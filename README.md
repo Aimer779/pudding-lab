@@ -2,12 +2,17 @@
 
 一个可抓取、会回弹的焦糖奶油布丁实验台。Three.js 原生 WebGPU 渲染，CPU XPBD 体积软体，原生 HTML/CSS 控制面板，无后端。
 
+[在线体验](https://aimer779.github.io/pudding-lab/) · [GitHub 仓库](https://github.com/Aimer779/pudding-lab)
+
+体验需要支持 WebGPU 的浏览器，并开启硬件加速。
+
 ## 本地运行
 
 环境：Node.js 24 或符合 Vite 要求的 Node.js 版本，pnpm 11。测试命令使用 Node 24 的 TypeScript 去类型和无子进程测试模式。
 
 ```powershell
-cd D:\code\codex-test\pudding-lab
+git clone https://github.com/Aimer779/pudding-lab.git
+cd pudding-lab
 pnpm install --frozen-lockfile
 pnpm dev
 ```
@@ -66,13 +71,15 @@ pnpm build
 - [验收报告](docs/verification.md)
 - [实施决策](docs/implementation.md)
 - [初始设计存档](docs/initial-design.md)
-- [Fable 5.1 High 独立评审](reviews/fable-5.1-high-review.md)
-- [评审核对](reviews/review-assessment.md)
+
+评审原文及验收报告中引用的 `evidence/` 产物仅保留在本地，不包含在公开仓库中。
 
 移动视口验证不能证明真实手机 GPU 性能。构建包含 Three.js WebGPU 引擎，会有单块超过 500kB 的体积提示；实际 gzip JavaScript 约 244kB，构建成功。
 
 ## 分享与部署
 
-通过 Sites 发布分享版本。站点配置位于 `.openai/hosting.json`，仅托管 `dist` 中的静态网页资源。浏览器仍需支持 WebGPU。
+公开体验站点托管在 [GitHub Pages](https://aimer779.github.io/pudding-lab/)。推送到 `main` 后，[部署工作流](.github/workflows/pages.yml) 自动安装锁定依赖、执行行为测试和物理验证，再完成类型检查、构建与发布。也可在 GitHub Actions 中手动运行。
 
-为 Sites 的源码保存流程初始化了本项目的 Git 仓库。评审原文、机器信息和本地验收产物保留在本地，不上传为站点源码或网页资源。
+工作流通过 Vite 的 `--base` 参数设置仓库子路径，仅发布 `dist` 中的静态资源。部署配置参考 [Vite 官方指南](https://vite.dev/guide/static-deploy#github-pages)。
+
+原有 Sites 配置保留在 `.openai/hosting.json`。默认 `pnpm build` 仍用于根路径托管；GitHub Pages 使用工作流中的带子路径构建。浏览器仍需支持 WebGPU。
