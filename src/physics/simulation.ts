@@ -6,6 +6,8 @@ export class Simulation {
   paused=false;
   slow=false;
   hidden=false;
+  /** Which pointer tool the stage uses; the panel switches it and Reset restores the grab. */
+  tool:'grab'|'spoon'='grab';
   time=0;
   get alpha(){return this.accumulator/this.stepSize;}
   advance(elapsed:number) {
@@ -19,9 +21,9 @@ export class Simulation {
   }
   pause(value:boolean) {this.paused=value;this.stopInput();}
   visibility(hidden:boolean) {this.hidden=hidden;this.stopInput();}
-  private stopInput(){this.accumulator=0;this.body.release();this.body.previous.set(this.body.position);}
+  private stopInput(){this.accumulator=0;this.body.release();this.body.spoon=null;this.body.previous.set(this.body.position);}
   reset(drop=0) {
-    this.paused=false;this.slow=false;this.time=0;this.accumulator=0;
+    this.paused=false;this.slow=false;this.tool='grab';this.time=0;this.accumulator=0;
     this.body.firmness=.45;this.body.damping=3.04;this.body.reset(drop);
   }
   nudge(){if(!this.paused&&!this.hidden)this.body.nudge();}

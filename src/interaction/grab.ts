@@ -12,7 +12,7 @@ export function installGrab(canvas:HTMLCanvasElement,world:World,sim:Simulation)
   }
   function cancel(){sim.body.release();if(active!==null&&canvas.hasPointerCapture(active))canvas.releasePointerCapture(active);active=null;canvas.classList.remove('grabbing');}
   canvas.addEventListener('pointerdown',e=>{
-    if(sim.paused||sim.hidden||active!==null||e.button!==0)return;
+    if(sim.tool!=='grab'||sim.paused||sim.hidden||active!==null||e.button!==0)return;
     rayAt(e);const hit=ray.intersectObject(world.pudding)[0];if(!hit?.face)return;
     const {a,b,c}=hit.face,positions=world.pudding.geometry.attributes.position;
     const bary=Triangle.getBarycoord(hit.point,new Vector3().fromBufferAttribute(positions,a),new Vector3().fromBufferAttribute(positions,b),new Vector3().fromBufferAttribute(positions,c),new Vector3());

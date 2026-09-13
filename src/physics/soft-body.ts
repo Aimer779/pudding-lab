@@ -1,24 +1,37 @@
-import { makeVolumeMesh, tetVolume } from './mesh.ts';
+import { makeVolumeMesh, repairRemoval, tetVolume, cellCoords, nodeIndex } from './mesh.ts';
 import type { Vec3, VolumeMesh } from './mesh.ts';
 
+export interface Spoon { center: Vec3; radii: Vec3 }
+/** A removed bite together with the body state it was cut from, so a visual chunk can be built from it. */
+export interface Bite { cells: number[]; source: { mesh: VolumeMesh; position: Float64Array } }
+export const SPOON_RADII: Vec3 = [.36, .2, .28];
+
 export class SoftBody {
-  readonly mesh:VolumeMesh;
-  readonly position:Float64Array;
-  readonly previous:Float64Array;
-  readonly velocity:Float64Array;
-  readonly inverseMass:Float64Array;
-  private readonly old:Float64Array;
+  mesh:VolumeMesh;
+  position:Float64Array;
+  previous:Float64Array;
+  velocity:Float64Array;
+  inverseMass:Float64Array;
+  private old:Float64Array;
+  private readonly full:VolumeMesh;
   private readonly gradients=new Float64Array(12);
+  /** Increments whenever the topology changes so bound surfaces know to rebuild. */
+  version=0;
   firmness=.45;
   damping=3.04;
   grab: {weights:[number,number][];target:Vec3;cursor:Vec3;anchor:Vec3} | null=null;
+  spoon: Spoon | null=null;
   constructor(mesh=makeVolumeMesh()) {
+    this.full=mesh.removed.size?makeVolumeMesh(mesh.n,mesh.layers):mesh;
     this.mesh=mesh;this.position=mesh.rest.slice();this.previous=mesh.rest.slice();
     this.old=mesh.rest.slice();this.velocity=new Float64Array(mesh.rest.length);
     this.inverseMass=Float64Array.from(mesh.mass,m=>1/m);
   }
+  get eaten(){return this.mesh.removed;}
+  get empty(){return this.mesh.cells.length===0;}
   reset(drop=0) {
-    this.position.set(this.mesh.rest);this.velocity.fill(0);this.grab=null;
+    if(this.mesh!==this.full)this.rebuild(this.full);
+    this.position.set(this.mesh.rest);this.velocity.fill(0);this.grab=null;this.spoon=null;
     for(let i=1;i<this.position.length;i+=3) this.position[i]+=drop;
     this.previous.set(this.position);this.old.set(this.position);
   }
@@ -26,6 +39,41 @@ export class SoftBody {
     const p:Vec3=[0,0,0];
     for(const [id,w] of weights) for(let k=0;k<3;k++) p[k]+=this.position[id*3+k]*w;
     return p;
+  }
+  /** Current centre of an active cell, averaged over its eight corner nodes. */
+  cellCenter(index:number):Vec3 {
+    const {n,lookup}=this.mesh,[x,y,z]=cellCoords(this.mesh.cells[index],n),c:Vec3=[0,0,0];
+    for(const dx of [0,1])for(const dy of [0,1])for(const dz of [0,1]) {
+      const j=lookup[nodeIndex(x+dx,y+dy,z+dz,n)]*3;
+      for(let k=0;k<3;k++)c[k]+=this.position[j+k]/8;
+    }
+    return c;
+  }
+  /**
+   * Eats every cell whose centre lies inside the spoon (grown by `margin`), then repairs the remainder into
+   * one closed body. Returns the bite and the pre-cut state, or null when nothing was inside the spoon.
+   */
+  scoop(spoon:Spoon,margin=.08):Bite|null {
+    const {n,layers,cells}=this.mesh,removed=new Set(this.mesh.removed);
+    const distance=(c:Vec3)=>Math.hypot(...c.map((v,k)=>(v-spoon.center[k])/(spoon.radii[k]+margin)));
+    const scores=new Map<number,number>();
+    for(let i=0;i<cells.length;i++){const d=distance(this.cellCenter(i));scores.set(cells[i],d);if(d<1)removed.add(cells[i]);}
+    if(removed.size===this.mesh.removed.size)return null;
+    repairRemoval(n,layers,removed,cell=>scores.get(cell)??Infinity);
+    const bite=[...removed].filter(id=>!this.mesh.removed.has(id));
+    const source={mesh:this.mesh,position:this.position.slice()};
+    this.rebuild(makeVolumeMesh(n,layers,removed));
+    return {cells:bite,source};
+  }
+  private rebuild(mesh:VolumeMesh) {
+    const old=this.mesh,position=this.position,velocity=this.velocity,count=mesh.mass.length;
+    this.mesh=mesh;this.position=new Float64Array(count*3);this.velocity=new Float64Array(count*3);
+    for(let i=0;i<count;i++) {
+      const j=old.lookup[mesh.nodeIds[i]];
+      for(let k=0;k<3;k++){this.position[i*3+k]=j>=0?position[j*3+k]:mesh.rest[i*3+k];this.velocity[i*3+k]=j>=0?velocity[j*3+k]:0;}
+    }
+    this.previous=this.position.slice();this.old=this.position.slice();
+    this.inverseMass=Float64Array.from(mesh.mass,m=>1/m);this.grab=null;this.version++;
   }
   beginGrab(weights:[number,number][]) {
     const anchor=this.point(weights);
@@ -127,13 +175,27 @@ export class SoftBody {
     }
   }
   private collide() {
-    for(let i=0;i<this.position.length;i+=3) {
-      this.position[i+1]=Math.max(0,this.position[i+1]);
+    const p=this.position;
+    if(this.spoon) {
+      // A soft pusher shaped like the lower half of the bowl: nodes under the bowl move part of the way to
+      // its surface each substep, so the spoon sinks in instead of acting as a rigid wall. Pudding above the
+      // bowl centre is left alone; that is what ends up sitting in the spoon.
+      const {center,radii}=this.spoon;
+      for(let i=0;i<p.length;i+=3) {
+        const qx=(p[i]-center[0])/radii[0],qy=(p[i+1]-center[1])/radii[1],qz=(p[i+2]-center[2])/radii[2];
+        const d=Math.hypot(qx,qy,qz);if(qy>=0||d>=1||d<1e-6)continue;
+        const k=.25*(1/d-1);
+        p[i]+=qx*radii[0]*k;p[i+1]+=qy*radii[1]*k;p[i+2]+=qz*radii[2]*k;
+      }
+    }
+    for(let i=0;i<p.length;i+=3) {
+      p[i+1]=Math.max(0,p[i+1]);
     }
     // A collective stage constraint preserves shape at the interaction boundary.
     // Clipping each particle against an invisible wall collapses whole tetrahedra.
     let x=0,z=0,mass=0;
     for(let i=0;i<this.mesh.mass.length;i++){const m=this.mesh.mass[i];mass+=m;x+=this.position[i*3]*m;z+=this.position[i*3+2]*m;}
+    if(mass<=0)return;
     x/=mass;z/=mass;
     const dx=Math.max(-.38,Math.min(.38,x))-x,dz=Math.max(-.3,Math.min(.3,z))-z;
     if(dx||dz)for(let i=0;i<this.position.length;i+=3){this.position[i]+=dx;this.position[i+2]+=dz;}
@@ -152,17 +214,19 @@ export class SoftBody {
     }
   }
   metrics() {
-    let volume=0,minRatio=Infinity,energy=0,minY=Infinity,maxRadius=0;
+    let volume=0,rest=0,minRatio=Infinity,energy=0,minY=Infinity,maxRadius=0;
     for(let t=0;t<this.mesh.volumes.length;t++) {
       const ids=this.mesh.tets.subarray(t*4,t*4+4);
       const v=tetVolume(this.position,ids[0],ids[1],ids[2],ids[3]);
-      volume+=v;minRatio=Math.min(minRatio,v/this.mesh.volumes[t]);
+      volume+=v;rest+=this.mesh.volumes[t];minRatio=Math.min(minRatio,v/this.mesh.volumes[t]);
     }
     for(let i=0;i<this.mesh.mass.length;i++) {
       const j=i*3;
       energy+=.5*this.mesh.mass[i]*(this.velocity[j]**2+this.velocity[j+1]**2+this.velocity[j+2]**2);
       minY=Math.min(minY,this.position[j+1]);maxRadius=Math.max(maxRadius,Math.hypot(this.position[j],this.position[j+2]));
     }
-    return {volumeRatio:volume/this.mesh.volumes.reduce((a,b)=>a+b,0),minTetRatio:minRatio,energy,minY,maxRadius,finite:this.position.every(Number.isFinite)};
+    let eatenVolume=0;for(const cell of this.mesh.removed)eatenVolume+=this.mesh.cellVolumes[cell];
+    const empty=this.mesh.volumes.length===0;
+    return {volumeRatio:empty?1:volume/rest,minTetRatio:empty?1:minRatio,energy,minY:empty?0:minY,maxRadius,eatenRatio:eatenVolume/this.mesh.fullVolume,finite:this.position.every(Number.isFinite)};
   }
 }

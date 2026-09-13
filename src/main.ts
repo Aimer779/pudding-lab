@@ -3,6 +3,7 @@ import { Simulation } from './physics/simulation.ts';
 import { createWorld } from './scene/world.ts';
 import type { Flavor, World } from './scene/world.ts';
 import { installGrab } from './interaction/grab.ts';
+import { installSpoon } from './interaction/spoon.ts';
 import { mountPanel, element } from './ui/panel.ts';
 
 mountPanel();
@@ -10,7 +11,7 @@ const sim=new Simulation(),canvas=element<HTMLCanvasElement>('#scene');
 const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const inspect=new URLSearchParams(location.search).has('inspect');
 const abort=new AbortController(),opts={signal:abort.signal};
-let world:World|undefined,grab:ReturnType<typeof installGrab>|undefined;
+let world:World|undefined,grab:ReturnType<typeof installGrab>|undefined,spoon:ReturnType<typeof installSpoon>|undefined;
 let last=0,lastRead=0,selectedFlavor:Flavor='vanilla',disposed=false;
 let benchmark:{start:number;frames:number[];cpu:number[];lastNudge:number}|null=null;
 const status=element('#gpu-status'),message=element('#scene-message');
@@ -24,6 +25,11 @@ function setFlavor(name:Flavor) {
   document.querySelectorAll<HTMLButtonElement>('[data-flavor]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.flavor===name)));
   element('#flavor-number').textContent={vanilla:'01 / 03',berry:'02 / 03',matcha:'03 / 03'}[name];
 }
+function setTool(tool:'grab'|'spoon') {
+  grab?.cancel();spoon?.cancel();sim.tool=tool;
+  if(world)world.spoon.visible=tool==='spoon';canvas.classList.toggle('spoon',tool==='spoon');
+  document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.tool===tool)));
+}
 function sliders() {
   const firmness=element<HTMLInputElement>('#firmness'),damping=element<HTMLInputElement>('#damping');
   sim.body.firmness=Number(firmness.value)/100;sim.body.damping=Number(damping.value)/100*8;
@@ -32,23 +38,25 @@ function sliders() {
   for(const el of [firmness,damping])el.style.background=`linear-gradient(to right,#2d3830 ${el.value}%,#d7dcd1 ${el.value}%)`;
 }
 function reset() {
-  grab?.cancel();sim.reset();setFlavor('vanilla');
+  grab?.cancel();spoon?.cancel();sim.reset();setFlavor('vanilla');setTool('grab');
   element<HTMLInputElement>('#firmness').value='45';element<HTMLInputElement>('#damping').value='38';sliders();
-  element<HTMLInputElement>('#slow').checked=false;element<HTMLInputElement>('#mesh').checked=false;if(world)world.wire.visible=false;
+  element<HTMLInputElement>('#slow').checked=false;element<HTMLInputElement>('#mesh').checked=false;if(world)world.mesh=false;
   element('#pause').textContent='Pause';element('#pause').setAttribute('aria-pressed','false');
 }
 document.querySelectorAll<HTMLButtonElement>('[data-flavor]').forEach(b=>b.addEventListener('click',()=>setFlavor(b.dataset.flavor as Flavor),opts));
+document.querySelectorAll<HTMLButtonElement>('[data-tool]').forEach(b=>b.addEventListener('click',()=>setTool(b.dataset.tool as 'grab'|'spoon'),opts));
+element('#bite').addEventListener('click',()=>{setTool('spoon');spoon?.bite();},opts);
 element('#firmness').addEventListener('input',sliders,opts);element('#damping').addEventListener('input',sliders,opts);
 element('#nudge').addEventListener('click',()=>sim.nudge(),opts);element('#reset').addEventListener('click',reset,opts);
 element('#pause').addEventListener('click',()=>{
-  grab?.cancel();sim.pause(!sim.paused);element('#pause').textContent=sim.paused?'Resume':'Pause';element('#pause').setAttribute('aria-pressed',String(sim.paused));
+  grab?.cancel();spoon?.cancel();sim.pause(!sim.paused);element('#pause').textContent=sim.paused?'Resume':'Pause';element('#pause').setAttribute('aria-pressed',String(sim.paused));
 },opts);
 element('#slow').addEventListener('change',()=>{sim.slow=element<HTMLInputElement>('#slow').checked;},opts);
-element('#mesh').addEventListener('change',()=>{if(world)world.wire.visible=element<HTMLInputElement>('#mesh').checked;},opts);
-document.addEventListener('visibilitychange',()=>{grab?.cancel();sim.visibility(document.hidden);last=0;},opts);
+element('#mesh').addEventListener('change',()=>{if(world)world.mesh=element<HTMLInputElement>('#mesh').checked;},opts);
+document.addEventListener('visibilitychange',()=>{grab?.cancel();spoon?.cancel();sim.visibility(document.hidden);last=0;},opts);
 function fail(error:unknown) {
   if(disposed)return;
-  world?.renderer.setAnimationLoop(null);grab?.cancel();
+  world?.renderer.setAnimationLoop(null);grab?.cancel();spoon?.cancel();
   enableControls(false);
   status.className='status failed';status.innerHTML='<b></b> WEBGPU UNAVAILABLE';
   message.hidden=false;message.textContent=error instanceof Error?error.message:String(error);
@@ -88,7 +96,8 @@ async function start() {
     world=await createWorld(canvas,sim);if(disposed){world.dispose();return;}
     world.renderer.onDeviceLost=()=>fail(new Error('The graphics device was disconnected. Try again to resume.'));
     world.renderer.onError=error=>fail(new Error(typeof error==='string'?error:JSON.stringify(error)));
-    grab=installGrab(canvas,world,sim);sim.reset(reduced?0:.1);sliders();
+    grab=installGrab(canvas,world,sim);spoon=installSpoon(canvas,world,sim,bite=>world!.serve(bite));
+    sim.reset(reduced?0:.1);sliders();setTool('grab');
     enableControls(true);
     if(reduced)for(let i=0;i<480;i++)sim.body.step(sim.stepSize);
     sim.body.previous.set(sim.body.position);
@@ -102,13 +111,14 @@ async function start() {
       if(now-lastRead>150) {
         const m=sim.body.metrics();element('#volume').textContent=`${(m.volumeRatio*100).toFixed(1)}%`;
         element('#motion').textContent=Math.min(9.99,Math.sqrt(m.energy)).toFixed(2);
-        element('#state').textContent=sim.paused?'Paused':sim.body.grab?'Held':m.energy>.0002?'Wobbling':'At rest';
-        if(inspect)element('#physics-info').textContent=JSON.stringify({...m,flavor:selectedFlavor,paused:sim.paused,slow:sim.slow,grabbed:!!sim.body.grab,simulationTime:sim.time,pointer:grab?.stats},null,2);
+        element('#eaten').textContent=`${Math.round(m.eatenRatio*100)}%`;
+        element('#state').textContent=sim.paused?'Paused':sim.body.empty?'All eaten':sim.body.grab?'Held':sim.body.spoon?'Pressing':world!.serving?'Nom':m.energy>.0002?'Wobbling':'At rest';
+        if(inspect)element('#physics-info').textContent=JSON.stringify({...m,flavor:selectedFlavor,tool:sim.tool,paused:sim.paused,slow:sim.slow,grabbed:!!sim.body.grab,cells:sim.body.mesh.cells.length,nodes:sim.body.mesh.mass.length,simulationTime:sim.time,pointer:grab?.stats,spoon:spoon?.stats},null,2);
         lastRead=now;
       }
     });
   }catch(error){fail(error);}
 }
-function dispose(){if(disposed)return;disposed=true;abort.abort();grab?.dispose();world?.dispose();}
+function dispose(){if(disposed)return;disposed=true;abort.abort();grab?.dispose();spoon?.dispose();world?.dispose();}
 window.addEventListener('pagehide',dispose,{once:true,signal:abort.signal});if(import.meta.hot)import.meta.hot.dispose(dispose);
 void start();
