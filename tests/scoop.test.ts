@@ -20,7 +20,17 @@ test('the complete cage is unchanged by the cell-removal refactor',()=>{
   assert.equal(m.mass.length,486);assert.equal(m.volumes.length,1920);assert.equal(m.quads.length,288);
   assert.ok(m.outer.every(v=>v===1||v===0));assert.equal(m.removed.size,0);
   assert.ok(Math.abs(m.fullVolume-m.volumes.reduce((a,b)=>a+b,0))<1e-9);
-  assert.ok(closed(m.quads));assert.equal(new PuddingSurface(m).indices.length/3,9216);
+  assert.ok(closed(m.quads));
+  const skin=new PuddingSurface(m);assert.equal(skin.indices.length/3,9216);
+  // Normals come from the same pass as positions: unit length and facing away from the body.
+  let outward=0;
+  for(let i=0;i<skin.count;i++) {
+    const n=skin.normals.subarray(i*3,i*3+3),p=skin.positions.subarray(i*3,i*3+3);
+    assert.ok(Math.abs(Math.hypot(n[0],n[1],n[2])-1)<1e-5);
+    if(n[0]*p[0]+n[1]*(p[1]-m.height/2)+n[2]*p[2]>0)outward++;
+  }
+  assert.ok(outward>skin.count*.97,`${outward} of ${skin.count} normals face outward`);
+  assert.ok(skin.bounds.radius>1&&skin.bounds.radius<2&&Math.abs(skin.bounds.center[1]-m.height/2)<.05);
 });
 
 test('removing cells keeps a closed manifold boundary and exposes interior nodes as cut',()=>{
@@ -87,9 +97,16 @@ test('a spoon press deforms without inversion and the scoop removes a bounded bi
   const after=s.body.metrics();
   assert.ok(after.eatenRatio>0&&after.eatenRatio<.15,`eaten ${after.eatenRatio}`);
   assert.ok(after.finite&&after.minTetRatio>0);
+  // Snapping moved cut nodes onto the bowl while keeping every rest tetrahedron healthy and the skin closed.
+  assert.ok(s.body.snappedNodes>0,'cut nodes snapped toward the spoon');
+  const grid=makeVolumeMesh(s.body.mesh.n,s.body.mesh.layers,s.body.mesh.removed);
+  for(let t=0;t<grid.volumes.length;t++)assert.ok(s.body.mesh.volumes[t]>.3*grid.volumes[t]&&s.body.mesh.volumes[t]<2.5*grid.volumes[t],`rest tet ${t}`);
+  assert.ok(s.body.mesh.rest.some((v,i)=>Math.abs(v-grid.rest[i])>1e-6));
+  assert.ok(Math.abs(s.body.metrics().volumeRatio-after.volumeRatio)<1e-9);
   run(s,5);const settled=s.body.metrics();
   assert.ok(settled.finite&&settled.minTetRatio>0&&Math.abs(settled.volumeRatio-1)<.03,JSON.stringify(settled));
-  console.log('scoop',{bite:bite.cells.length,scoopMs:took,nodes:s.body.mesh.mass.length,tets:s.body.mesh.volumes.length,before:before.volumeRatio,eaten:after.eatenRatio});
+  let skinMs=Infinity;for(let i=0;i<5;i++){const t=performance.now();new PuddingSurface(s.body.mesh);skinMs=Math.min(skinMs,performance.now()-t);}
+  console.log('scoop',{bite:bite.cells.length,scoopMs:took,skinMs,nodes:s.body.mesh.mass.length,tets:s.body.mesh.volumes.length,before:before.volumeRatio,eaten:after.eatenRatio});
 });
 
 test('the whole pudding can be eaten bite by bite and reset restores the complete cage',()=>{

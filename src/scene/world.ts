@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { attribute, mix, uniform } from 'three/tsl';
+import { attribute, mix, mx_noise_float, positionLocal, uniform } from 'three/tsl';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { PuddingSurface } from '../pudding/surface.ts';
 import { surfaceAttributes } from '../pudding/attributes.ts';
@@ -16,7 +16,7 @@ export const flavors={
   matcha:{body:'#acbb79',top:'#4c642c',cut:'#c3cf98'},
 };
 export type Flavor=keyof typeof flavors;
-const SERVE_SECONDS=1.6;
+const SERVE_SECONDS=1.35;
 export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
   if(!navigator.gpu)throw new Error('This browser cannot serve WebGPU yet. Open this page in a WebGPU-enabled browser.');
   const adapter=await navigator.gpu.requestAdapter();
@@ -42,27 +42,32 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
   const grid=new THREE.GridHelper(24,48,'#989e90','#989e90');grid.position.y=-.004;
   (grid.material as THREE.Material).transparent=true;(grid.material as THREE.Material).opacity=.045;scene.add(grid);
   /** The visible skin is rebuilt from the current cage whenever a bite changes the topology. */
-  function skinGeometry(skin:PuddingSurface,mesh:VolumeMesh,positions:Float32Array) {
+  function skinGeometry(skin:PuddingSurface,mesh:VolumeMesh,positions:Float32Array,normals:Float32Array) {
     const geometry=new THREE.BufferGeometry();
     geometry.setIndex(new THREE.BufferAttribute(skin.indices,1));
     geometry.setAttribute('position',new THREE.BufferAttribute(positions,3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('normal',new THREE.BufferAttribute(normals,3).setUsage(THREE.DynamicDrawUsage));
     const {glaze,cut}=surfaceAttributes(skin,mesh);
     geometry.setAttribute('glaze',new THREE.BufferAttribute(glaze,1));geometry.setAttribute('cut',new THREE.BufferAttribute(cut,1));
-    geometry.computeVertexNormals();return geometry;
+    geometry.boundingSphere=new THREE.Sphere(new THREE.Vector3(...skin.bounds.center),skin.bounds.radius);return geometry;
   }
   const bodyColor=uniform(new THREE.Color(flavors.vanilla.body)),topColor=uniform(new THREE.Color(flavors.vanilla.top)),cutColor=uniform(new THREE.Color(flavors.vanilla.cut));
   const g=attribute<'float'>('glaze','float'),c=attribute<'float'>('cut','float');
   const material=new THREE.MeshPhysicalNodeMaterial({metalness:0,ior:1.42,roughness:.34,clearcoat:.3});
-  material.colorNode=mix(mix(bodyColor,topColor,g),cutColor,c);material.roughnessNode=mix(mix(.34,.18,g),.62,c);material.clearcoatNode=mix(mix(.22,.85,g),.04,c);
+  // Cut custard is matte and slightly torn: two octaves of noise in rest-ish space break up colour and roughness.
+  const grain=mx_noise_float(positionLocal.mul(9)).mul(.6).add(mx_noise_float(positionLocal.mul(27)).mul(.4));
+  const torn=grain.mul(.5).add(.5);
+  material.colorNode=mix(mix(bodyColor,topColor,g),mix(cutColor,bodyColor,torn.mul(.45)),c);
+  material.roughnessNode=mix(mix(.34,.18,g),torn.mul(.28).add(.5),c);material.clearcoatNode=mix(mix(.22,.85,g),.03,c);
   material.clearcoatRoughness=.18;
   let skin=new PuddingSurface(sim.body.mesh),skinVersion=sim.body.version;
-  const pudding=new THREE.Mesh(skinGeometry(skin,sim.body.mesh,skin.positions),material);pudding.castShadow=true;pudding.receiveShadow=true;scene.add(pudding);
+  const pudding=new THREE.Mesh(skinGeometry(skin,sim.body.mesh,skin.positions,skin.normals),material);pudding.castShadow=true;pudding.receiveShadow=true;scene.add(pudding);
   const wire=new THREE.Mesh(pudding.geometry,new THREE.MeshBasicNodeMaterial({color:'#655937',wireframe:true,transparent:true,opacity:.12,depthWrite:false}));
   wire.visible=false;scene.add(wire);
   let showMesh=false;
   function rebuildSkin() {
     skin=new PuddingSurface(sim.body.mesh);skinVersion=sim.body.version;
-    pudding.geometry.dispose();pudding.geometry=skinGeometry(skin,sim.body.mesh,skin.positions);wire.geometry=pudding.geometry;
+    pudding.geometry.dispose();pudding.geometry=skinGeometry(skin,sim.body.mesh,skin.positions,skin.normals);wire.geometry=pudding.geometry;
     pudding.visible=!sim.body.empty;wire.visible=showMesh&&!sim.body.empty;
   }
   // The spoon: a dish matching the physics pusher, turned so the handle points toward the viewer's right.
@@ -71,12 +76,13 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
   const spoon=new THREE.Group();spoon.visible=false;
   const cutlery=buildSpoon(steel);cutlery.group.rotation.y=SPOON_YAW;spoon.add(cutlery.group);
   const plate=new THREE.Group();spoon.add(plate);scene.add(spoon);
-  const spoonTarget=new THREE.Vector3(0,1.9,0),lift=new THREE.Vector3(),toward=new THREE.Vector3(3.4,2.2,6.8).normalize();
+  const spoonTarget=new THREE.Vector3(0,1.9,0),lift=new THREE.Vector3(),toward=new THREE.Vector3(3.4,2.2,6.8).normalize(),goal=new THREE.Vector3();
+  let spoonTilt=0,tilt=0,settled=false;
   let serving:{chunk:THREE.Mesh;time:number}|null=null;
   /** Lifts the bite on the spoon toward the viewer and shrinks it away: eaten. */
   function serve(bite:Bite) {
     const built=buildChunk(bite);if(!built)return;
-    const chunk=new THREE.Mesh(skinGeometry(built.skin,built.mesh,built.positions),material);chunk.castShadow=true;
+    const chunk=new THREE.Mesh(skinGeometry(built.skin,built.mesh,built.positions,built.skin.normals.slice()),material);chunk.castShadow=true;
     // Seat the bite in the dish: its underside rests just above the dish bottom and heaps over the rim.
     chunk.geometry.computeBoundingBox();const centre=chunk.geometry.boundingBox!.getCenter(new THREE.Vector3());
     chunk.position.copy(centre).negate().setY(-chunk.geometry.boundingBox!.min.y-SPOON_RADII[1]*(1-(1+SPOON_RIM)*.35));plate.add(chunk);plate.scale.setScalar(1);
@@ -96,21 +102,32 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
     camera.position.set(3.4,2.9,width>1280?6.8:7.7);camera.lookAt(0,.67,0);camera.updateProjectionMatrix();
   }
   const observer=new ResizeObserver(resize);observer.observe(canvas);resize();
+  // Warm every pipeline the spoon and a served bite will need, so the first press does not stall on compilation.
+  const warm=new THREE.Mesh(pudding.geometry,material);plate.add(warm);spoon.visible=true;
+  await renderer.compileAsync(scene,camera);
+  plate.remove(warm);spoon.visible=false;
   function update(dt:number) {
     if(skinVersion!==sim.body.version)rebuildSkin();
     const a=sim.paused||sim.hidden?1:sim.alpha;
     if(!sim.body.empty) {
       skin.update(sim.body.previous,sim.body.position,a);
       const geometry=pudding.geometry;
-      geometry.attributes.position.needsUpdate=true;geometry.computeVertexNormals();geometry.computeBoundingSphere();geometry.computeBoundingBox();
+      geometry.attributes.position.needsUpdate=true;geometry.attributes.normal.needsUpdate=true;
+      geometry.boundingSphere!.center.set(skin.bounds.center[0],skin.bounds.center[1],skin.bounds.center[2]);geometry.boundingSphere!.radius=skin.bounds.radius;
     }
+    let tiltGoal=spoonTilt;
     if(serving) {
-      serving.time+=dt;const t=Math.min(1,serving.time/SERVE_SECONDS),ease=t*t*(3-2*t);
-      lift.copy(toward).multiplyScalar(ease*.9).setY(ease*.55);
-      const bitten=Math.min(1,Math.max(0,(t-.6)/.35));plate.scale.setScalar(1-bitten*bitten*(3-2*bitten));
+      serving.time+=dt;const t=Math.min(1,serving.time/SERVE_SECONDS),ease=t*t*(3-2*t),back=1-Math.min(1,Math.max(0,(t-.75)/.25));
+      // Rise toward the viewer while the bite is on the spoon, then drift back as it disappears.
+      lift.copy(toward).multiplyScalar(ease*.7*back).setY(ease*.5*back);tiltGoal-=.18*back;
+      const bitten=Math.min(1,Math.max(0,(t-.55)/.32));plate.scale.setScalar(1-bitten*bitten*(3-2*bitten));
       if(t>=1)finishServing();
     }
-    spoon.position.copy(spoonTarget).add(lift);
+    // Critically smooth the visible spoon toward its target: quick enough to feel direct, slow enough to hide
+    // pointer quantisation and the hit/miss switch at the silhouette. The first frame snaps.
+    goal.copy(spoonTarget).add(lift);
+    const follow=settled?1-Math.exp(-dt*26):1;settled=true;
+    spoon.position.lerp(goal,follow);tilt+=(tiltGoal-tilt)*(1-Math.exp(-dt*14));cutlery.group.rotation.z=tilt;
     const k=1-Math.exp(-dt*8);
     bodyColor.value.lerp(targetBody,k);topColor.value.lerp(targetTop,k);cutColor.value.lerp(targetCut,k);
   }
@@ -120,6 +137,9 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
     renderer,scene,camera,pudding,wire,spoon,spoonTarget,flavor,update,dispose,serve,
     get skin(){return skin;},
     get serving(){return serving!==null;},
+    /** Nose-down angle requested by the interaction; the scene eases toward it. */
+    set spoonTilt(value:number){spoonTilt=value;},
+    get spoonTilt(){return spoonTilt;},
     /** Wireframe visibility follows the toggle but never shows an empty cage. */
     set mesh(visible:boolean){showMesh=visible;wire.visible=visible&&!sim.body.empty;},
     get mesh(){return showMesh;},

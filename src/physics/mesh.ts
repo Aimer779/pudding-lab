@@ -103,24 +103,26 @@ export function makeVolumeMesh(n = 8, layers = 5, removed: Iterable<number> = []
   });
   const tets=Uint32Array.from(gridTets,id=>lookup[id]), quads=gridQuads.map(q=>q.map(id=>lookup[id]) as Quad);
   const volumes=new Float64Array(tets.length/4), mass=new Float64Array(used.length);
-  const edgeMap=new Map<string,[number,number]>();
+  const edgeSet=new Set<number>(), nodeCount=used.length;
   let minVolume=Infinity, maxEdgeRatio=0, minQuality=Infinity;
   for(let i=0;i<volumes.length;i++) {
     const ids=Array.from(tets.subarray(i*4,i*4+4));
     const vol=tetVolume(rest,ids[0],ids[1],ids[2],ids[3]);
     volumes[i]=vol; minVolume=Math.min(minVolume,vol);
     ids.forEach(id=>mass[id]+=vol/4);
-    const lens=[];
+    let longest=0, shortest=Infinity, sum=0;
     for(let a=0;a<4;a++) for(let b=a+1;b<4;b++) {
       const p=Math.min(ids[a],ids[b]),q=Math.max(ids[a],ids[b]);
-      edgeMap.set(`${p},${q}`,[p,q]);
-      lens.push(Math.hypot(rest[p*3]-rest[q*3],rest[p*3+1]-rest[q*3+1],rest[p*3+2]-rest[q*3+2]));
+      edgeSet.add(p*nodeCount+q);
+      const l=Math.hypot(rest[p*3]-rest[q*3],rest[p*3+1]-rest[q*3+1],rest[p*3+2]-rest[q*3+2]);
+      longest=Math.max(longest,l); shortest=Math.min(shortest,l); sum+=l*l;
     }
-    maxEdgeRatio=Math.max(maxEdgeRatio,Math.max(...lens)/Math.min(...lens));
-    minQuality=Math.min(minQuality,12*Math.pow(3*vol,2/3)/lens.reduce((s,l)=>s+l*l,0));
+    maxEdgeRatio=Math.max(maxEdgeRatio,longest/shortest);
+    minQuality=Math.min(minQuality,12*Math.pow(3*vol,2/3)/sum);
   }
   if(minVolume<1e-7 || minQuality<.08) throw new Error(`Degenerate pudding cage: volume=${minVolume}, quality=${minQuality}, edgeRatio=${maxEdgeRatio}`);
-  const edges=new Uint32Array([...edgeMap.values()].flat());
+  const edges=new Uint32Array(edgeSet.size*2); let e=0;
+  for(const key of edgeSet){edges[e++]=Math.floor(key/nodeCount);edges[e++]=key%nodeCount;}
   const lengths=new Float64Array(edges.length/2);
   for(let e=0;e<lengths.length;e++) {
     const a=edges[e*2]*3,b=edges[e*2+1]*3;
@@ -140,13 +142,19 @@ export function repairRemoval(n: number, layers: number, removed: Set<number>, s
   const id=(c:number[])=>cellIndex(c[0],c[1],c[2],n);
   const active=(c:number[])=>inside(c)&&!removed.has(id(c));
   const drop=(cells:number[])=>{let best=cells[0];for(const c of cells)if(score(c)<score(best))best=c;removed.add(best);};
-  const adjacent=(a:number[],b:number[])=>a.reduce((s,v,i)=>s+Math.abs(v-b[i]),0)===1;
   const components=(cells:number[][])=>{
-    const seen=new Set<number>(),groups:number[][][]=[];
+    const members=new Map(cells.map(c=>[id(c),c] as [number,number[]])),seen=new Set<number>(),groups:number[][][]=[];
     for(const start of cells) {
       if(seen.has(id(start)))continue;
       const group=[start],queue=[start];seen.add(id(start));
-      while(queue.length){const c=queue.pop()!;for(const o of cells)if(!seen.has(id(o))&&adjacent(c,o)){seen.add(id(o));group.push(o);queue.push(o);}}
+      while(queue.length) {
+        const c=queue.pop()!;
+        for(let axis=0;axis<3;axis++)for(const step of [-1,1]) {
+          const o=c.slice();o[axis]+=step;if(!inside(o))continue;
+          const key=id(o),cell=members.get(key);
+          if(cell&&!seen.has(key)){seen.add(key);group.push(cell);queue.push(cell);}
+        }
+      }
       groups.push(group);
     }
     return groups;

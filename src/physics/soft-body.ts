@@ -26,6 +26,10 @@ export class SoftBody {
   private old:Float64Array;
   private readonly full:VolumeMesh;
   private readonly gradients=new Float64Array(12);
+  /** Rest volumes straight from the grid, before any snapping; the guard for how far a cut node may move. */
+  private pristine:Float64Array;
+  /** Rest offsets by grid node id from snapping cut faces toward the spoon; reapplied after every rebuild. */
+  private readonly restOffsets=new Map<number,Vec3>();
   /** Increments whenever the topology changes so bound surfaces know to rebuild. */
   version=0;
   firmness=.45;
@@ -36,11 +40,13 @@ export class SoftBody {
     this.full=mesh.removed.size?makeVolumeMesh(mesh.n,mesh.layers):mesh;
     this.mesh=mesh;this.position=mesh.rest.slice();this.previous=mesh.rest.slice();
     this.old=mesh.rest.slice();this.velocity=new Float64Array(mesh.rest.length);
-    this.inverseMass=Float64Array.from(mesh.mass,m=>1/m);
+    this.inverseMass=Float64Array.from(mesh.mass,m=>1/m);this.pristine=mesh.volumes.slice();
   }
   get eaten(){return this.mesh.removed;}
   get empty(){return this.mesh.cells.length===0;}
+  get snappedNodes(){return this.restOffsets.size;}
   reset(drop=0) {
+    this.restOffsets.clear();
     if(this.mesh!==this.full)this.rebuild(this.full);
     this.position.set(this.mesh.rest);this.velocity.fill(0);this.grab=null;this.spoon=null;
     for(let i=1;i<this.position.length;i+=3) this.position[i]+=drop;
@@ -75,17 +81,68 @@ export class SoftBody {
     const bite=[...removed].filter(id=>!this.mesh.removed.has(id));
     const source={mesh:this.mesh,position:this.position.slice()};
     this.rebuild(makeVolumeMesh(n,layers,removed));
+    this.snap(grown);
     return {cells:bite,source};
   }
   private rebuild(mesh:VolumeMesh) {
     const old=this.mesh,position=this.position,velocity=this.velocity,count=mesh.mass.length;
-    this.mesh=mesh;this.position=new Float64Array(count*3);this.velocity=new Float64Array(count*3);
+    this.mesh=mesh;this.pristine=mesh.volumes.slice();this.position=new Float64Array(count*3);this.velocity=new Float64Array(count*3);
     for(let i=0;i<count;i++) {
-      const j=old.lookup[mesh.nodeIds[i]];
-      for(let k=0;k<3;k++){this.position[i*3+k]=j>=0?position[j*3+k]:mesh.rest[i*3+k];this.velocity[i*3+k]=j>=0?velocity[j*3+k]:0;}
+      const j=old.lookup[mesh.nodeIds[i]],offset=this.restOffsets.get(mesh.nodeIds[i]);
+      for(let k=0;k<3;k++) {
+        if(offset)mesh.rest[i*3+k]+=offset[k];
+        this.position[i*3+k]=j>=0?position[j*3+k]:mesh.rest[i*3+k];this.velocity[i*3+k]=j>=0?velocity[j*3+k]:0;
+      }
     }
     this.previous=this.position.slice();this.old=this.position.slice();
-    this.inverseMass=Float64Array.from(mesh.mass,m=>1/m);this.grab=null;this.version++;
+    this.refreshRest();this.grab=null;this.version++;
+  }
+  /** Recomputes rest lengths, rest volumes and masses after the rest positions moved. */
+  private refreshRest() {
+    const {rest,tets,volumes,edges,lengths,mass}=this.mesh;mass.fill(0);
+    for(let t=0;t<volumes.length;t++) {
+      const a=tets[t*4],b=tets[t*4+1],c=tets[t*4+2],d=tets[t*4+3],v=tetVolume(rest,a,b,c,d);
+      volumes[t]=v;mass[a]+=v/4;mass[b]+=v/4;mass[c]+=v/4;mass[d]+=v/4;
+    }
+    for(let e=0;e<lengths.length;e++) {
+      const a=edges[e*2]*3,b=edges[e*2+1]*3;
+      lengths[e]=Math.hypot(rest[a]-rest[b],rest[a+1]-rest[b+1],rest[a+2]-rest[b+2]);
+    }
+    this.inverseMass=Float64Array.from(mass,m=>1/m);
+  }
+  /**
+   * Vertex snapping: boundary nodes near the spoon surface move onto it, in rest space and deformed space
+   * alike, so the hole follows the bowl instead of the cell staircase. Each move is capped below half a
+   * cell and rejected when an incident tetrahedron would leave 30%–250% of its grid rest volume. The
+   * original outer skin is only ever pulled toward the hole, never bulged outward.
+   */
+  private snap(spoon:Spoon) {
+    const mesh=this.mesh,{rest,tets,quads,outer,nodeIds}=mesh,p=this.position;
+    const cap=.42*Math.min(2/mesh.n,mesh.height/mesh.layers),c=Math.cos(spoon.yaw??0),s=Math.sin(spoon.yaw??0);
+    const incident:number[][]=Array.from({length:mesh.mass.length},()=>[]);
+    for(let t=0;t<tets.length;t++)incident[tets[t]].push(t>>2);
+    for(const i of new Set(quads.flat())) {
+      const [qx,qy,qz]=spoonLocal(spoon,p[i*3],p[i*3+1],p[i*3+2]),d=Math.hypot(qx,qy,qz);
+      if(d<1e-6||Math.abs(d-1)>.4||(outer[i]&&d<1))continue;
+      const k=1/d-1,lx=qx*spoon.radii[0]*k,lz=qz*spoon.radii[2]*k;
+      let dx=c*lx+s*lz,dy=qy*spoon.radii[1]*k,dz=-s*lx+c*lz;
+      const length=Math.hypot(dx,dy,dz);if(length<1e-4)continue;
+      const scale=Math.min(1,cap/length);dx*=scale;dy*=scale;dz*=scale;
+      for(let attempt=0;attempt<3;attempt++) {
+        rest[i*3]+=dx;rest[i*3+1]+=dy;rest[i*3+2]+=dz;
+        const ok=incident[i].every(t=>{
+          const v=tetVolume(rest,tets[t*4],tets[t*4+1],tets[t*4+2],tets[t*4+3]);
+          return v>.3*this.pristine[t]&&v<2.5*this.pristine[t];
+        });
+        if(ok) {
+          for(const arr of [p,this.previous,this.old]){arr[i*3]+=dx;arr[i*3+1]+=dy;arr[i*3+2]+=dz;}
+          const prior=this.restOffsets.get(nodeIds[i])??[0,0,0];
+          this.restOffsets.set(nodeIds[i],[prior[0]+dx,prior[1]+dy,prior[2]+dz]);break;
+        }
+        rest[i*3]-=dx;rest[i*3+1]-=dy;rest[i*3+2]-=dz;dx*=.5;dy*=.5;dz*=.5;
+      }
+    }
+    this.refreshRest();
   }
   beginGrab(weights:[number,number][]) {
     const anchor=this.point(weights);
