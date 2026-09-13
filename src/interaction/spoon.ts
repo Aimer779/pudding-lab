@@ -1,14 +1,14 @@
 import { Raycaster,Vector2,Vector3,Plane } from 'three/webgpu';
 import type { World } from '../scene/world.ts';
 import type { Simulation } from '../physics/simulation.ts';
-import { SPOON_RADII } from '../physics/soft-body.ts';
+import { SPOON_RADII, SPOON_YAW } from '../physics/soft-body.ts';
 import type { Bite, Spoon } from '../physics/soft-body.ts';
 
 /** The spoon hovers over the skin, presses in while the pointer is down, and takes its bite on release. */
 export function installSpoon(canvas:HTMLCanvasElement,world:World,sim:Simulation,onBite:(bite:Bite)=>void) {
   const abort=new AbortController(),options={signal:abort.signal};
   const ray=new Raycaster(),pointer=new Vector2(),plane=new Plane(),target=new Vector3(),rest=new Plane(new Vector3(0,1,0),-1.1);
-  const spoon:Spoon={center:[0,1.9,0],radii:SPOON_RADII};
+  const spoon:Spoon={center:[0,1.9,0],radii:SPOON_RADII,yaw:SPOON_YAW};
   let active:number|null=null;
   const stats={presses:0,bites:0,lastBiteCells:0};
   function rayAt(e:PointerEvent) {

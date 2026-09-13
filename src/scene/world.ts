@@ -5,8 +5,9 @@ import { PuddingSurface } from '../pudding/surface.ts';
 import { surfaceAttributes } from '../pudding/attributes.ts';
 import { buildChunk } from '../pudding/chunk.ts';
 import type { VolumeMesh } from '../physics/mesh.ts';
-import { SPOON_RADII } from '../physics/soft-body.ts';
+import { SPOON_RADII, SPOON_RIM, SPOON_YAW } from '../physics/soft-body.ts';
 import type { Bite } from '../physics/soft-body.ts';
+import { buildSpoon } from './spoon-mesh.ts';
 import type { Simulation } from '../physics/simulation.ts';
 
 export const flavors={
@@ -64,14 +65,11 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
     pudding.geometry.dispose();pudding.geometry=skinGeometry(skin,sim.body.mesh,skin.positions);wire.geometry=pudding.geometry;
     pudding.visible=!sim.body.empty;wire.visible=showMesh&&!sim.body.empty;
   }
-  // The spoon: a metal bowl matching the physics ellipsoid, plus a handle rising toward the viewer.
-  const steel=new THREE.MeshStandardNodeMaterial({color:'#d9d8d2',metalness:.92,roughness:.24,side:THREE.DoubleSide});
+  // The spoon: a dish matching the physics pusher, turned so the handle points toward the viewer's right.
+  // The bite sits on an unrotated plate so its frozen world-space vertices keep their orientation.
+  const steel=new THREE.MeshStandardNodeMaterial({color:'#dcdbd5',metalness:.94,roughness:.2,side:THREE.DoubleSide});
   const spoon=new THREE.Group();spoon.visible=false;
-  const bowl=new THREE.Mesh(new THREE.SphereGeometry(1,40,20,0,Math.PI*2,Math.PI/2,Math.PI/2),steel);
-  bowl.scale.set(SPOON_RADII[0],SPOON_RADII[1],SPOON_RADII[2]);bowl.castShadow=true;spoon.add(bowl);
-  const rim=new THREE.Mesh(new THREE.TorusGeometry(1,.028,10,48),steel);rim.rotation.x=Math.PI/2;rim.scale.set(SPOON_RADII[0],SPOON_RADII[2],1);spoon.add(rim);
-  const handle=new THREE.Mesh(new THREE.CapsuleGeometry(.045,1.15,6,14),steel);
-  handle.position.set(SPOON_RADII[0]+.5,.28,.42);handle.rotation.set(0,0,-1.18);handle.rotateX(.62);handle.castShadow=true;spoon.add(handle);
+  const cutlery=buildSpoon(steel);cutlery.group.rotation.y=SPOON_YAW;spoon.add(cutlery.group);
   const plate=new THREE.Group();spoon.add(plate);scene.add(spoon);
   const spoonTarget=new THREE.Vector3(0,1.9,0),lift=new THREE.Vector3(),toward=new THREE.Vector3(3.4,2.2,6.8).normalize();
   let serving:{chunk:THREE.Mesh;time:number}|null=null;
@@ -79,9 +77,9 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
   function serve(bite:Bite) {
     const built=buildChunk(bite);if(!built)return;
     const chunk=new THREE.Mesh(skinGeometry(built.skin,built.mesh,built.positions),material);chunk.castShadow=true;
-    // Seat the bite in the bowl: its centre rests a little above the rim plane so it reads as sitting on the spoon.
+    // Seat the bite in the dish: its underside rests just above the dish bottom and heaps over the rim.
     chunk.geometry.computeBoundingBox();const centre=chunk.geometry.boundingBox!.getCenter(new THREE.Vector3());
-    chunk.position.copy(centre).negate().setY(-chunk.geometry.boundingBox!.min.y-SPOON_RADII[1]*.7);plate.add(chunk);plate.scale.setScalar(1);
+    chunk.position.copy(centre).negate().setY(-chunk.geometry.boundingBox!.min.y-SPOON_RADII[1]*(1-(1+SPOON_RIM)*.35));plate.add(chunk);plate.scale.setScalar(1);
     if(serving)finishServing();
     serving={chunk,time:0};
   }
@@ -116,7 +114,7 @@ export async function createWorld(canvas:HTMLCanvasElement,sim:Simulation) {
     const k=1-Math.exp(-dt*8);
     bodyColor.value.lerp(targetBody,k);topColor.value.lerp(targetTop,k);cutColor.value.lerp(targetCut,k);
   }
-  function dispose(){observer.disconnect();renderer.setAnimationLoop(null);finishServing();pudding.geometry.dispose();material.dispose();wire.material.dispose();steel.dispose();bowl.geometry.dispose();rim.geometry.dispose();handle.geometry.dispose();ground.geometry.dispose();ground.material.dispose();grid.geometry.dispose();(grid.material as THREE.Material).dispose();envTarget.dispose();light.shadow.dispose();renderer.dispose();}
+  function dispose(){observer.disconnect();renderer.setAnimationLoop(null);finishServing();pudding.geometry.dispose();material.dispose();wire.material.dispose();steel.dispose();cutlery.dispose();ground.geometry.dispose();ground.material.dispose();grid.geometry.dispose();(grid.material as THREE.Material).dispose();envTarget.dispose();light.shadow.dispose();renderer.dispose();}
   const info=adapter.info;
   return {
     renderer,scene,camera,pudding,wire,spoon,spoonTarget,flavor,update,dispose,serve,

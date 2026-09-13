@@ -1,10 +1,21 @@
 import { makeVolumeMesh, repairRemoval, tetVolume, cellCoords, nodeIndex } from './mesh.ts';
 import type { Vec3, VolumeMesh } from './mesh.ts';
 
-export interface Spoon { center: Vec3; radii: Vec3 }
+/** The bowl is an ellipsoid; `yaw` is its rotation about y (three.js convention), long axis along local x. */
+export interface Spoon { center: Vec3; radii: Vec3; yaw?: number }
 /** A removed bite together with the body state it was cut from, so a visual chunk can be built from it. */
 export interface Bite { cells: number[]; source: { mesh: VolumeMesh; position: Float64Array } }
-export const SPOON_RADII: Vec3 = [.36, .2, .28];
+/** Long axis along the handle, shallow depth, narrower across. */
+export const SPOON_RADII: Vec3 = [.42, .26, .30];
+/** Rim plane in normalised bowl height; only the dish below it exists physically, the rest is the heap it can hold. */
+export const SPOON_RIM = -.35;
+/** Handle points toward the viewer's right (+x, +z in world). */
+export const SPOON_YAW = -Math.atan2(.6, .8);
+/** Normalised bowl-local coordinates of a world point: unit sphere is the bowl surface. */
+export function spoonLocal(spoon: Spoon, x: number, y: number, z: number): Vec3 {
+  const c = Math.cos(spoon.yaw ?? 0), s = Math.sin(spoon.yaw ?? 0), dx = x-spoon.center[0], dz = z-spoon.center[2];
+  return [(c*dx-s*dz)/spoon.radii[0], (y-spoon.center[1])/spoon.radii[1], (s*dx+c*dz)/spoon.radii[2]];
+}
 
 export class SoftBody {
   mesh:VolumeMesh;
@@ -53,9 +64,10 @@ export class SoftBody {
    * Eats every cell whose centre lies inside the spoon (grown by `margin`), then repairs the remainder into
    * one closed body. Returns the bite and the pre-cut state, or null when nothing was inside the spoon.
    */
-  scoop(spoon:Spoon,margin=.08):Bite|null {
+  scoop(spoon:Spoon,margin=.06):Bite|null {
     const {n,layers,cells}=this.mesh,removed=new Set(this.mesh.removed);
-    const distance=(c:Vec3)=>Math.hypot(...c.map((v,k)=>(v-spoon.center[k])/(spoon.radii[k]+margin)));
+    const grown:Spoon={...spoon,radii:spoon.radii.map(r=>r+margin) as Vec3};
+    const distance=(c:Vec3)=>Math.hypot(...spoonLocal(grown,c[0],c[1],c[2]));
     const scores=new Map<number,number>();
     for(let i=0;i<cells.length;i++){const d=distance(this.cellCenter(i));scores.set(cells[i],d);if(d<1)removed.add(cells[i]);}
     if(removed.size===this.mesh.removed.size)return null;
@@ -177,15 +189,15 @@ export class SoftBody {
   private collide() {
     const p=this.position;
     if(this.spoon) {
-      // A soft pusher shaped like the lower half of the bowl: nodes under the bowl move part of the way to
-      // its surface each substep, so the spoon sinks in instead of acting as a rigid wall. Pudding above the
-      // bowl centre is left alone; that is what ends up sitting in the spoon.
-      const {center,radii}=this.spoon;
+      // A soft pusher shaped like the dish below the rim: nodes under the bowl move part of the way to its
+      // surface each substep, so the spoon sinks in instead of acting as a rigid wall. Pudding above the rim
+      // plane is left alone; that is what ends up sitting in the spoon.
+      const {radii}=this.spoon,c=Math.cos(this.spoon.yaw??0),s=Math.sin(this.spoon.yaw??0);
       for(let i=0;i<p.length;i+=3) {
-        const qx=(p[i]-center[0])/radii[0],qy=(p[i+1]-center[1])/radii[1],qz=(p[i+2]-center[2])/radii[2];
-        const d=Math.hypot(qx,qy,qz);if(qy>=0||d>=1||d<1e-6)continue;
-        const k=.25*(1/d-1);
-        p[i]+=qx*radii[0]*k;p[i+1]+=qy*radii[1]*k;p[i+2]+=qz*radii[2]*k;
+        const [qx,qy,qz]=spoonLocal(this.spoon,p[i],p[i+1],p[i+2]);
+        const d=Math.hypot(qx,qy,qz);if(qy>=SPOON_RIM||d>=1||d<1e-6)continue;
+        const k=.25*(1/d-1),lx=qx*radii[0]*k,lz=qz*radii[2]*k;
+        p[i]+=c*lx+s*lz;p[i+1]+=qy*radii[1]*k;p[i+2]+=-s*lx+c*lz;
       }
     }
     for(let i=0;i<p.length;i+=3) {

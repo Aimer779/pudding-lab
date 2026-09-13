@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Simulation } from '../src/physics/simulation.ts';
-import { SPOON_RADII } from '../src/physics/soft-body.ts';
+import { SPOON_RADII, SPOON_YAW, spoonLocal } from '../src/physics/soft-body.ts';
 import type { Vec3 } from '../src/physics/mesh.ts';
 import { makeVolumeMesh, repairRemoval, cellIndex } from '../src/physics/mesh.ts';
 import { PuddingSurface } from '../src/pudding/surface.ts';
@@ -58,9 +58,20 @@ test('removal repair eliminates edge-only and vertex-only contacts and drops loo
   assert.ok(closed(makeVolumeMesh(n,layers,split).quads));
 });
 
+test('the yawed bowl frame follows the three.js rotation convention, long axis along the handle',()=>{
+  const spoon={center:[.2,1,-.1] as Vec3,radii:SPOON_RADII,yaw:SPOON_YAW};
+  // rotation.y=yaw maps local +x to world (cos yaw, 0, -sin yaw); the handle points to +x,+z for a negative yaw.
+  const dir=[Math.cos(SPOON_YAW),0,-Math.sin(SPOON_YAW)];
+  assert.ok(dir[0]>0&&dir[2]>0);
+  const onTip=spoonLocal(spoon,spoon.center[0]+dir[0]*SPOON_RADII[0],spoon.center[1],spoon.center[2]+dir[2]*SPOON_RADII[0]);
+  assert.ok(Math.abs(onTip[0]-1)<1e-9&&Math.abs(onTip[1])<1e-9&&Math.abs(onTip[2])<1e-9,JSON.stringify(onTip));
+  const above=spoonLocal(spoon,spoon.center[0],spoon.center[1]+SPOON_RADII[1],spoon.center[2]);
+  assert.deepEqual(above.map(v=>Math.round(v*1e9)/1e9),[0,1,0]);
+});
+
 test('a spoon press deforms without inversion and the scoop removes a bounded bite',()=>{
   const s=new Simulation();run(s,2);
-  const spoon={center:[.25,s.body.mesh.height+SPOON_RADII[1]*.9,.1] as Vec3,radii:SPOON_RADII};
+  const spoon={center:[.25,s.body.mesh.height+SPOON_RADII[1]*.9,.1] as Vec3,radii:SPOON_RADII,yaw:SPOON_YAW};
   s.body.spoon=spoon;let minRatio=Infinity;
   for(let i=0;i<90;i++){spoon.center[1]-=.3/90;s.advance(1/60);minRatio=Math.min(minRatio,s.body.metrics().minTetRatio);}
   assert.ok(minRatio>0,`press inverted ${minRatio}`);
